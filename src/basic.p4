@@ -161,8 +161,8 @@ control MyIngress(inout headers hdr,
 ****************  E G R E S S   P R O C E S S I N G   *******************
 *************************************************************************/
 #define COUNTERS_PER_TABLE 1024
-#define HASH_MIN 10w0
-#define HASH_MAX 10w1023
+#define HASH_MIN 32w0
+#define HASH_MAX 32w1023
 
 // HashPipe implementation here (d=2)
 control MyEgress(inout headers hdr,
@@ -199,10 +199,11 @@ control MyEgress(inout headers hdr,
         // different hash functions used
         hash(
             meta.s1Index, 
-            HashAlgorithm.crc16, 
+            HashAlgorithm.crc32, 
             HASH_MIN, 
             {
-                meta.flowId
+                meta.flowId, 
+                8w0xFF
             },
             HASH_MAX
         );
@@ -294,6 +295,7 @@ control MyEgress(inout headers hdr,
                 mBitToWrite = 1;
             }
         }       
+
 
         // no eviction, maintain current key, value, and metadata
         if (mDiff ==0) {
