@@ -53,7 +53,6 @@ header udp_t {
     bit<16> checksum;
 }
 
-// TODO: Define metadata here
 struct metadata {
     bit<104>    flowId;
     bit<32>     s1Index;
@@ -103,6 +102,7 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.tcp);
         transition accept;
     }
+
     state parse_udp {
         packet.extract(hdr.udp);
         transition accept;
@@ -131,10 +131,10 @@ control MyIngress(inout headers hdr,
     }
     
     action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
-	standard_metadata.egress_spec = port;
-	hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
-	hdr.ethernet.dstAddr = dstAddr;
-	hdr.ipv4.ttl = hdr.ipv4.ttl -1;
+        standard_metadata.egress_spec = port;
+        hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
+        hdr.ethernet.dstAddr = dstAddr;
+        hdr.ipv4.ttl = hdr.ipv4.ttl -1;
     }
     
     table ipv4_lpm {
@@ -196,7 +196,6 @@ control MyEgress(inout headers hdr,
     }
 
     action compute_index () {
-        // different hash functions used
         hash(
             meta.s1Index, 
             HashAlgorithm.crc32, 
@@ -220,6 +219,7 @@ control MyEgress(inout headers hdr,
     }
 
     // variable declarations, should they be here?
+    // have to check again whether this is valid or not
     bit<104>  mDiff;
     bit<32>   mIndex;
 
@@ -231,7 +231,6 @@ control MyEgress(inout headers hdr,
     bit<32>  mCountTable;
     bit<1>   mValid;
 
-    // First table stage
     action s1Action () {
         meta.mKeyCarried = meta.flowId;
         meta.mCountCarried = 1;
@@ -254,7 +253,7 @@ control MyEgress(inout headers hdr,
             mCountToWrite = (mDiff == 0) ? mCountTable + 1 : mCountToWrite;
         } 
 
-        // update hash table
+        // update hash tables
         s1FlowTracker.write(mIndex, mKeyToWrite);
         s1PacketCount.write(mIndex, mCountToWrite);
         s1ValidBit.write(mIndex, mBitToWrite);
@@ -264,31 +263,32 @@ control MyEgress(inout headers hdr,
         meta.mCountCarried = (mDiff == 0) ? 0 : mCountTable;
     }
 
-    //WSecond table stage
     action s2Action () {
-        // mKeyCarried, mCountCarried is set
+        // mKeyCarried is set
+        // mCountCarried is set
         mIndex = meta.s2Index;
         mDiff = 0;
 
+        // init
         mKeyToWrite = 0;
         mCountToWrite = 0;
         mBitToWrite = 0;
         
-        // read the key value for that location
+        // read the key, value at mIndex
         s2FlowTracker.read(mKeyTable, mIndex);
         s2PacketCount.read(mCountTable, mIndex);
         s2ValidBit.read(mValid, mIndex);
 
-        // if empty
+        // if the slot is empty
         if (mValid != 1) {
             mDiff = 1;
             mKeyToWrite = meta.mKeyCarried;
             mCountToWrite = meta.mCountCarried;
             mBitToWrite = 1;
         } else {
-            // compare the values
+            // compare the count values
             if (meta.mCountCarried > mCountTable) {
-                // time to evict
+                // evict the key with smaller count value
                 mDiff = 1;
                 mKeyToWrite = meta.mKeyCarried;
                 mCountToWrite = meta.mCountCarried;
@@ -296,14 +296,13 @@ control MyEgress(inout headers hdr,
             }
         }       
 
-
-        // no eviction, maintain current key, value, and metadata
-        if (mDiff ==0) {
+        // if no eviction, maintain current key, value, and metadata
+        if (mDiff == 0) {
             mKeyToWrite = mKeyTable;
             mCountToWrite = mCountTable;
             mBitToWrite = mValid;
         } else {
-            // eviction occurs, have to update metadata
+            // if eviction occurs, have to update metadata 
             meta.mKeyCarried = mKeyTable;
             meta.mCountCarried = mCountTable;
         }
@@ -329,9 +328,11 @@ control MyEgress(inout headers hdr,
     }
 
     apply {
+        // preprocessing
         extract_flow_id();
         compute_index();
 
+        // HashPipe here
         stage1.apply();
         stage2.apply();
     }
@@ -343,22 +344,25 @@ control MyEgress(inout headers hdr,
 *************************************************************************/
 
 control MyComputeChecksum(inout headers hdr, inout metadata meta) {
-     apply {
-	update_checksum(
-	    hdr.ipv4.isValid(),
-            { hdr.ipv4.version,
-	      hdr.ipv4.ihl,
-              hdr.ipv4.diffserv,
-              hdr.ipv4.totalLen,
-              hdr.ipv4.identification,
-              hdr.ipv4.flags,
-              hdr.ipv4.fragOffset,
-              hdr.ipv4.ttl,
-              hdr.ipv4.protocol,
-              hdr.ipv4.srcAddr,
-              hdr.ipv4.dstAddr },
+    apply {
+        update_checksum(
+            hdr.ipv4.isValid(),
+            { 
+                hdr.ipv4.version,
+                hdr.ipv4.ihl,
+                hdr.ipv4.diffserv,
+                hdr.ipv4.totalLen,
+                hdr.ipv4.identification,
+                hdr.ipv4.flags,
+                hdr.ipv4.fragOffset,
+                hdr.ipv4.ttl,
+                hdr.ipv4.protocol,
+                hdr.ipv4.srcAddr,
+                hdr.ipv4.dstAddr 
+            },
             hdr.ipv4.hdrChecksum,
-            HashAlgorithm.csum16);
+            HashAlgorithm.csum16
+        );
     }
 }
 
@@ -369,9 +373,10 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
 
 control MyDeparser(packet_out packet, in headers hdr) {
     apply {
-        /* TODO: add deparser logic */
-	packet.emit(hdr.ethernet);
-	packet.emit(hdr.ipv4);
+        packet.emit(hdr.ethernet);
+        packet.emit(hdr.ipv4);
+        packet.emit(hdr.tcp);
+        packet.emit(hdr.udp);
     }
 }
 
@@ -380,10 +385,10 @@ control MyDeparser(packet_out packet, in headers hdr) {
 *************************************************************************/
 
 V1Switch(
-MyParser(),
-MyVerifyChecksum(),
-MyIngress(),
-MyEgress(),
-MyComputeChecksum(),
-MyDeparser()
+    MyParser(),
+    MyVerifyChecksum(),
+    MyIngress(),
+    MyEgress(),
+    MyComputeChecksum(),
+    MyDeparser()
 ) main;
