@@ -4,9 +4,9 @@
 
 const bit<16> TYPE_IPV4 = 0x800;
 
-const bit<32> COUNTERS_PER_TABLE = 32w8;
+const bit<32> COUNTERS_PER_TABLE = 32w1024;
 const bit<32> HASH_MIN = 32w0;
-const bit<32> HASH_MAX = 32w7;
+const bit<32> HASH_MAX = 32w1023;
 
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
@@ -95,9 +95,8 @@ parser MyParser(packet_in packet,
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
-            8w7     : parse_tcp;
+            8w6     : parse_tcp;
             8w17    : parse_udp;
-            // default : accept;
         }
     }
 
