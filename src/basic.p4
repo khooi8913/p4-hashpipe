@@ -4,6 +4,10 @@
 
 const bit<16> TYPE_IPV4 = 0x800;
 
+const bit<32> COUNTERS_PER_TABLE = 32w8;
+const bit<32> HASH_MIN = 32w0;
+const bit<32> HASH_MAX = 32w7;
+
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
 *************************************************************************/
@@ -85,7 +89,6 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
             TYPE_IPV4   : parse_ipv4;
-            default     : accept;
         }
     }
 
@@ -94,7 +97,7 @@ parser MyParser(packet_in packet,
         transition select(hdr.ipv4.protocol) {
             8w7     : parse_tcp;
             8w17    : parse_udp;
-            default : accept;
+            // default : accept;
         }
     }
 
@@ -160,9 +163,6 @@ control MyIngress(inout headers hdr,
 /*************************************************************************
 ****************  E G R E S S   P R O C E S S I N G   *******************
 *************************************************************************/
-#define COUNTERS_PER_TABLE 1024
-#define HASH_MIN 32w0
-#define HASH_MAX 32w1023
 
 // HashPipe implementation here (d=2)
 control MyEgress(inout headers hdr,
@@ -202,7 +202,7 @@ control MyEgress(inout headers hdr,
             HASH_MIN, 
             {
                 meta.flowId, 
-                8w0xFF
+                104w12345678901234567890
             },
             HASH_MAX
         );
@@ -286,13 +286,23 @@ control MyEgress(inout headers hdr,
             mCountToWrite = meta.mCountCarried;
             mBitToWrite = 1;
         } else {
-            // compare the count values
-            if (meta.mCountCarried > mCountTable) {
-                // evict the key with smaller count value
-                mDiff = 1;
-                mKeyToWrite = meta.mKeyCarried;
-                mCountToWrite = meta.mCountCarried;
-                mBitToWrite = 1;
+            mDiff = meta.mKeyCarried - mKeyTable;
+            // same key, increase count
+            if(mDiff == 0) {
+                mKeyToWrite = mKeyTable;
+                mCountToWrite = mCountTable + meta.mCountCarried;
+            } else {
+                // different key
+                // compare the count values
+                if (meta.mCountCarried > mCountTable) {
+                    // evict the key with smaller count value
+                    mKeyToWrite = meta.mKeyCarried;
+                    mCountToWrite = meta.mCountCarried;
+                    mBitToWrite = 1;
+                } else {
+                    // no eviction occurs
+                    mDiff = 0;
+                }
             }
         }       
 
@@ -314,6 +324,13 @@ control MyEgress(inout headers hdr,
     }
 
     table stage1 {
+        key = {
+            meta.mKeyCarried : exact;
+            meta.mCountCarried : exact;
+            meta.flowId : exact;
+            meta.s1Index : exact;
+            meta.s2Index: exact;
+        }
         actions = {
             s1Action();
         }
@@ -321,6 +338,13 @@ control MyEgress(inout headers hdr,
     }
 
     table stage2 {
+        key = {
+            meta.mKeyCarried : exact;
+            meta.mCountCarried : exact;
+            meta.flowId : exact;
+            meta.s1Index : exact;
+            meta.s2Index: exact;
+        }
         actions = {
             s2Action();
         }
@@ -334,7 +358,7 @@ control MyEgress(inout headers hdr,
 
         // HashPipe here
         stage1.apply();
-        stage2.apply();
+        if (meta.mKeyCarried != 0 && meta.mCountCarried != 0)   stage2.apply();
     }
 
 }
@@ -360,8 +384,8 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
                 hdr.ipv4.srcAddr,
                 hdr.ipv4.dstAddr 
             },
-            hdr.ipv4.hdrChecksum,
-            HashAlgorithm.csum16
+                hdr.ipv4.hdrChecksum,
+                HashAlgorithm.csum16
         );
     }
 }
