@@ -1,0 +1,6 @@
+{
+  "target": "bmv2",
+  "p4info": "build/hashpipe.p4.p4info.txt",
+  "bmv2_json": "build/hashpipe.json",
+  "table_entries": [ ]
+}
